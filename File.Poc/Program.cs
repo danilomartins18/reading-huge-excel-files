@@ -1,5 +1,4 @@
-﻿using Newtonsoft.Json;
-using System;
+﻿using System;
 
 namespace File.Poc
 {
@@ -24,6 +23,9 @@ namespace File.Poc
 
             //var dt = fileService.ExtractExcelSAXToDataTable(path);
             //Console.Write($"{JsonConvert.SerializeObject(dt)}");
+
+            //var dt = fileService.ExtractExcelSAXToDataTable(path);
+            //List<FileDto> list = fileService.BindList<FileDto>(dt);
 
             if (list.Count > 0) Console.Write($"Lista de {list.Count} gerada com sucesso!");
         }

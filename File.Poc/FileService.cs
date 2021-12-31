@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace File.Poc
 {
@@ -16,84 +17,83 @@ namespace File.Poc
         {
             var watch = Stopwatch.StartNew();
             var list = new List<T>();
-            Type typeOfObject = typeof(T);
-            var properties = typeOfObject.GetProperties();
+            var properties = typeof(T).GetProperties();
 
-            //i want to import excel to data table
-            //var dt = new DataTable();
             using (SpreadsheetDocument document = SpreadsheetDocument.Open(path, false))
             {
                 WorkbookPart workbookPart = document.WorkbookPart;
-                WorksheetPart worksheetPart = workbookPart.WorksheetParts.First();
+                //WorksheetPart worksheetPart = workbookPart.WorksheetParts.First();
 
-                OpenXmlReader reader = OpenXmlReader.Create(worksheetPart);
-
-                //row counter
-                int rcnt = 0;
-                while (reader.Read())
+                foreach (var worksheetPart in workbookPart.WorksheetParts)
                 {
-                    //find xml row element type 
-                    //to understand the element type you can change your excel file eg : test.xlsx to test.zip
-                    //and inside that you may observe the elements in xl/worksheets/sheet.xml
-                    //that helps to understand openxml better
-                    if (reader.ElementType == typeof(Row))
+                    OpenXmlReader reader = OpenXmlReader.Create(worksheetPart);
+
+                    //row counter
+                    int rcnt = 0;
+                    while (reader.Read())
                     {
-                        //create data table row type to be populated by cells of this row
-                        //DataRow tempRow = dt.NewRow();
-                        T obj = (T)Activator.CreateInstance(typeOfObject);
-                        //***** HANDLE THE SECOND SENARIO*****
-                        //if row has attribute means it is not a empty row
-                        if (reader.HasAttributes)
+                        //find xml row element type 
+                        //to understand the element type you can change your excel file eg : test.xlsx to test.zip
+                        //and inside that you may observe the elements in xl/worksheets/sheet.xml
+                        //that helps to understand openxml better
+                        if (reader.ElementType == typeof(Row))
                         {
-                            //read the child of row element which is cells
-                            //here first element
-                            reader.ReadFirstChild();
-                            do
+                            //create data table row type to be populated by cells of this row
+                            //DataRow tempRow = dt.NewRow();
+                            T obj = Activator.CreateInstance<T>();
+                            //***** HANDLE THE SECOND SENARIO*****
+                            //if row has attribute means it is not a empty row
+                            if (reader.HasAttributes)
                             {
-                                //find xml cell element type 
-                                if (reader.ElementType == typeof(Cell))
+                                //read the child of row element which is cells
+                                //here first element
+                                reader.ReadFirstChild();
+                                do
                                 {
-                                    Cell c = (Cell)reader.LoadCurrentElement();
+                                    //find xml cell element type 
+                                    if (reader.ElementType == typeof(Cell))
+                                    {
+                                        Cell c = (Cell)reader.LoadCurrentElement();
 
-                                    string cellValue;
-                                    int actualCellIndex = CellReferenceToIndex(c);
+                                        string cellValue;
+                                        int actualCellIndex = GetColumnIndex(c);
 
-                                    if (c.DataType != null && c.DataType == CellValues.SharedString)
-                                    {
-                                        SharedStringItem ssi = workbookPart.SharedStringTablePart.SharedStringTable.Elements<SharedStringItem>().ElementAt(int.Parse(c.CellValue.InnerText));
-                                        cellValue = ssi.Text.Text;
-                                    }
-                                    else
-                                    {
-                                        cellValue = c.CellValue.InnerText;
-                                    }
+                                        if (c.DataType != null && c.DataType == CellValues.SharedString)
+                                        {
+                                            SharedStringItem ssi = workbookPart.SharedStringTablePart.SharedStringTable.Elements<SharedStringItem>().ElementAt(int.Parse(c.CellValue.InnerText));
+                                            cellValue = ssi.Text.Text;
+                                        }
+                                        else
+                                        {
+                                            cellValue = c.CellValue.InnerText;
+                                        }
 
-                                    //if row index is 0 its header so columns headers are added & also can do some headers check incase
-                                    if (rcnt != 0)
-                                    {
-                                        //dt.Columns.Add(cellValue);
-                                    }
-                                    else
-                                    {
-                                        // instead of tempRow[c.CellReference] = cellValue;
-                                        var type = properties[actualCellIndex].PropertyType;
-                                        properties[actualCellIndex].SetValue(obj, Convert.ChangeType(cellValue, type));
-                                        //tempRow[actualCellIndex] = cellValue;
+                                        //if row index is 0 its header so columns headers are added & also can do some headers check incase
+                                        if (rcnt != 0)
+                                        {
+                                            // instead of tempRow[c.CellReference] = cellValue;
+                                            var type = properties[actualCellIndex - 1].PropertyType;
+                                            properties[actualCellIndex - 1].SetValue(obj, Convert.ChangeType(cellValue, type));
+                                        }
                                     }
                                 }
+                                while (reader.ReadNextSibling());
+                                //if its not the header row so append rowdata to the datatable
+                                if (rcnt != 0)
+                                {
+                                    //dt.Rows.Add(tempRow);
+                                    list.Add(obj);
+                                }
+                                rcnt++;
+                                Console.WriteLine($"{rcnt} - {watch.Elapsed}");
                             }
-                            while (reader.ReadNextSibling());
-                            //if its not the header row so append rowdata to the datatable
-                            if (rcnt != 0)
-                            {
-                                //dt.Rows.Add(tempRow);
-                                list.Add(obj);
-                            }
-                            rcnt++;
-                            Console.WriteLine($"{rcnt} - {watch.Elapsed}");
                         }
                     }
+                    reader.Close();
+                    reader.Dispose();
                 }
+                document.Close();
+                document.Dispose();
             }
             watch.Stop();
             Console.WriteLine($"Tempo levado: {watch.Elapsed}");
@@ -324,7 +324,7 @@ namespace File.Poc
                                     Cell c = (Cell)reader.LoadCurrentElement();
 
                                     string cellValue;
-                                    int actualCellIndex = CellReferenceToIndex(c);
+                                    int actualCellIndex = GetColumnIndex(c);
 
                                     if (c.DataType != null && c.DataType == CellValues.SharedString)
                                     {
@@ -344,7 +344,7 @@ namespace File.Poc
                                     else
                                     {
                                         // instead of tempRow[c.CellReference] = cellValue;
-                                        tempRow[actualCellIndex] = cellValue;
+                                        tempRow[actualCellIndex -1] = cellValue;
                                     }
                                 }
                             }
@@ -362,21 +362,30 @@ namespace File.Poc
             return dt;
         }
 
-        private int CellReferenceToIndex(Cell cell)
+        private static int GetColumnIndex(Cell cell)
         {
-            int index = 0;
-            string reference = cell.CellReference.ToString().ToUpper();
-            foreach (char ch in reference)
+            string cellReference = cell.CellReference.ToString().ToUpper();
+            if (string.IsNullOrEmpty(cellReference)) return 0;
+
+            //remove digits
+            string columnReference = Regex.Replace(cellReference.ToUpper(), @"[\d]", string.Empty);
+
+            int columnNumber = -1;
+            int mulitplier = 1;
+
+            //working from the end of the letters take the ASCII code less 64 (so A = 1, B =2...etc)
+            //then multiply that number by our multiplier (which starts at 1)
+            //multiply our multiplier by 26 as there are 26 letters
+            foreach (char c in columnReference.ToCharArray().Reverse())
             {
-                if (Char.IsLetter(ch))
-                {
-                    int value = (int)ch - (int)'A';
-                    index = (index == 0) ? value : ((index + 1) * 26) + value;
-                }
-                else
-                    return index;
+                columnNumber += mulitplier * ((int)c - 64);
+
+                mulitplier = mulitplier * 26;
             }
-            return index;
+
+            //the result is zero based so return columnnumber + 1 for a 1 based answer
+            //this will match Excel's COLUMN function
+            return columnNumber + 1;
         }
 
         public string GetValue(Cell cell, SharedStringTablePart stringTablePart)
@@ -394,6 +403,46 @@ namespace File.Poc
                 value = stringTablePart.SharedStringTable.ChildElements[Int32.Parse(value)].InnerText;
             }
             return value;
+        }
+
+        public List<T> BindList<T>(DataTable dt)
+        {
+            // Example 1:
+            // Get private fields + non properties
+            //var fields = typeof(T).GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+
+            // Example 2: Your case
+            // Get all public fields
+            var fields = typeof(T).GetProperties();
+
+            List<T> lst = new List<T>();
+
+            foreach (DataRow dr in dt.Rows)
+            {
+                // Create the object of T
+                var ob = Activator.CreateInstance<T>();
+
+                foreach (var fieldInfo in fields)
+                {
+                    foreach (DataColumn dc in dt.Columns)
+                    {
+                        // Matching the columns with fields
+                        if (fieldInfo.Name == dc.ColumnName)
+                        {
+                            // Get the value from the datatable cell
+                            object value = dr[dc.ColumnName];
+
+                            // Set the value into the object
+                            fieldInfo.SetValue(ob, value);
+                            break;
+                        }
+                    }
+                }
+
+                lst.Add(ob);
+            }
+
+            return lst;
         }
     }
 }
